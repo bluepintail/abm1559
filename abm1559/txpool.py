@@ -7,14 +7,24 @@ from abm1559.utils import (
     constants,
 )
 
+class Strategy:
+    def __init__(self, hash_power=1, block_fill_proportion=1):
+        self.hash_power = hash_power
+        self.block_fill_proportion = block_fill_proportion
+
+    def max_tx_in_block(self):
+        gas_ceiling = int(self.block_fill_proportion * constants["MAX_GAS_EIP1559"])
+        return int(gas_ceiling / constants["SIMPLE_TRANSACTION_GAS"])
+        
 class TxPool:
     """
     Represents the transaction queue.
     """
 
-    def __init__(self):
+    def __init__(self, strategies=[Strategy()]):
         self.txs = {}
         self.pool_length = 0
+        self.strategies = []
 
     def add_txs(self, txs: Sequence[Transaction]) -> None:
         """
@@ -45,6 +55,15 @@ class TxPool:
         for tx_hash in tx_hashes:
             del(self.txs[tx_hash])
         self.pool_length -= len(tx_hashes)
+    
+    def add_strategy(self, strategy):
+        self.strategies.append(strategy)
+
+    def select_strategy(self):
+        total_hash_power = sum(s.hash_power for s in self.strategies)
+        probs = [s.hash_power / total_hash_power for s in self.strategies]
+        index = rng.choice(len(self.strategies), p=probs)
+        return self.strategies[index]
 
     def average_tip(self, params): # in Gwei
         if self.pool_length == 0:
@@ -61,7 +80,9 @@ class TxPool:
     def select_transactions(self, params):
         # Miner side
         basefee = params["basefee"]
-        max_tx_in_block = int(constants["MAX_GAS_EIP1559"] / constants["SIMPLE_TRANSACTION_GAS"])
+        strategy = self.select_strategy()
+        max_tx_in_block = strategy.max_tx_in_block()
+        #max_tx_in_block = int(constants["MAX_GAS_EIP1559"] / constants["SIMPLE_TRANSACTION_GAS"])
 
         valid_txs = [tx for tx in self.txs.values() if tx.is_valid({ "basefee": basefee })]
         rng.shuffle(valid_txs)
